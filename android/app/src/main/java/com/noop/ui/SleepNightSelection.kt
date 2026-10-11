@@ -60,6 +60,7 @@ internal fun selectNight(
     // sleep fragment of an interrupted/biphasic night is never lost. The stub still rides in `groupStarts`
     // above, so it is never mislabelled as a nap. `session` (the edit anchor) is already the main block, so
     // the bedtime label and the pencil were aligned — this aligns the chart to that same bedtime. (#736/#555)
+    // An explicitly corrected onset remains authoritative even when its clipped fragment is small.
     val onsetTsForHero = session.effectiveStartTs
     // #259: reference size for the "minor relative to the main block" stub test = the largest asleep span in
     // the group (≈ the main block). A genuine biphasic first sleep is comparable to it and is kept; only a
@@ -83,7 +84,12 @@ internal fun selectNight(
     // and the iOS decodeSegments clamp), so the hypnogram starts where the edited bedtime does instead of
     // drawing pre-onset bars that contradict the clamped asleep total. No-op for non-edited nights.
     val groupSegmentsRaw = if (heroGroup.size > 1) {
-        heroGroup.flatMap { parsePersistedSegments(SleepStageTotals.clampStagesToOnset(it.stagesJSON, it.effectiveStartTs)).orEmpty() }
+        heroGroup.flatMap {
+            parsePersistedSegments(
+                SleepStageTotals.clampStagesToOnset(it.stagesJSON, it.effectiveStartTs),
+                minimumSegments = 1,
+            ).orEmpty()
+        }
             .sortedBy { it.start }
             .takeIf { it.size >= 2 }
     } else null
@@ -264,8 +270,9 @@ internal fun decodedAsleepMinutes(stagesJSON: String?, effectiveStartTs: Long): 
  *  episode floor. Used only to skip such a stub when it leads the main-night group, so the hero's hypnogram and
  *  minutes start at the displayed bedtime (the main block's onset) rather than before it. [refAsleepMin]
  *  defaults to 0 (relative test off) so existing callers/tests are byte-identical. Mirrors iOS
- *  SleepView.isPreOnsetAwakeStub. (#736 / #259) */
+ *  SleepView.isPreOnsetAwakeStub. Explicit corrected onsets are never stubs. (#736 / #259) */
 internal fun isPreOnsetAwakeStub(frag: SleepSession, refAsleepMin: Double = 0.0): Boolean {
+    if (frag.startTsAdjusted != null) return false
     val spanMin = (frag.endTs - frag.effectiveStartTs) / 60.0
     if (spanMin > PRE_ONSET_STUB_MAX_MIN) return false
     val asleepMin = decodedAsleepMinutes(frag.stagesJSON, frag.effectiveStartTs)

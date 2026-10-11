@@ -12,9 +12,10 @@ internal data class PersistedSegment(val start: Long, val end: Long, val stage: 
  * AnalyticsEngine.encodeStages). Returns null for the imported minutes shapes
  * (the macOS {"light",…} dict and the CSV-import [{stage,min}] array) and any
  * malformed input, so callers keep the synthesized fallback. Pure + unit-tested
- * (see SleepStageSegmentsTest).
+ * (see SleepStageSegmentsTest). [minimumSegments] defaults to two; group assembly may accept
+ * one segment per fragment and enforce the minimum after joining.
  */
-internal fun parsePersistedSegments(json: String?): List<PersistedSegment>? {
+internal fun parsePersistedSegments(json: String?, minimumSegments: Int = 2): List<PersistedSegment>? {
     if (json.isNullOrBlank()) return null
     val trimmed = json.trim()
     if (!trimmed.startsWith("[")) return null
@@ -29,7 +30,7 @@ internal fun parsePersistedSegments(json: String?): List<PersistedSegment>? {
             if (start == Long.MIN_VALUE || end <= start || stage.isEmpty()) return@runCatching null
             out.add(PersistedSegment(start, end, stage))
         }
-        out.takeIf { it.size >= 2 }
+        out.takeIf { it.size >= minimumSegments }
     }.getOrNull()
 }
 
