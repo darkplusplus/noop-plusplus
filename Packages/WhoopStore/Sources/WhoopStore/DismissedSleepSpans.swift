@@ -64,6 +64,13 @@ public enum DismissedSleepSpans {
     /// `DismissedSleepGuard.writesTombstoneOnDelete`.)
     public static func writesTombstoneOnDelete(userEdited: Bool) -> Bool { !userEdited }
 
+    /// Group retirement also suppresses a previously corrected detected row. An adjusted onset marks
+    /// that row as detected; a manually added session has no adjusted onset and needs no tombstone.
+    /// Android twin: `DismissedSleepGuard.writesTombstoneOnGroupRetirement`.
+    public static func writesTombstoneOnGroupRetirement(userEdited: Bool, hasAdjustedOnset: Bool) -> Bool {
+        !userEdited || hasAdjustedOnset
+    }
+
     /// Defensive hard cap on the tombstone list. The list is a permanent user choice, so unlike the
     /// auto-detect spans there is NO age prune (a prune would silently resurrect nights while banked raw
     /// still covers the window). Only guard against an unbounded list: keep the newest by end-time.

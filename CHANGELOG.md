@@ -20,8 +20,9 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 ## Unreleased
 
 - **Apple sleep-time edits now apply to the complete bridged night.** Correcting the displayed bed/wake
-  window updates all of its fragments and retires fragments outside that window. The explicitly chosen
-  onset remains the displayed bedtime even when only a few minutes of the first fragment survive.
+  window updates all of its fragments and retires fragments outside that window without letting a later
+  edit resurrect them. The explicitly chosen onset remains the displayed bedtime even when only a few
+  minutes of the first fragment survive.
 
 ## 12.0.0: Today your way, heart rate any app can read, and Italian (all platforms)
 

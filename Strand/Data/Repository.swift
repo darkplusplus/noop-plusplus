@@ -1571,8 +1571,8 @@ final class Repository: ObservableObject {
     /// Apply one corrected bed/wake window to every fragment of the bridged main sleep group. The Sleep
     /// hero and analytics use the whole group, so editing only the winning fragment leaves earlier/later
     /// fragments defining the same stale onset or wake. A one-row group keeps the raw-restaging behavior
-    /// of `editSleepTimes`; multi-row edits use the shared clipping planner and retire fragments wholly
-    /// outside the corrected window.
+    /// of `editSleepTimes`; multi-row edits use the shared clipping planner, retire fragments wholly
+    /// outside the corrected window, and tombstone detected fragments even after an earlier edit.
     func editSleepGroupTimes(sessions: [CachedSleepSession], newStartTs: Int, newEndTs: Int) async {
         guard sessions.count > 1, let store = await ensureStore(),
               let window = SleepEditGuard.clampedEditWindow(
@@ -1592,7 +1592,8 @@ final class Repository: ObservableObject {
             }
         }
         for session in plan.dropped {
-            if DismissedSleepSpans.writesTombstoneOnDelete(userEdited: session.userEdited) {
+            if DismissedSleepSpans.writesTombstoneOnGroupRetirement(
+                userEdited: session.userEdited, hasAdjustedOnset: session.startTsAdjusted != nil) {
                 dismissedSleepSpans = DismissedSleepSpans.adding(
                     startTs: session.startTs, endTs: session.endTs, to: dismissedSleepSpans)
             }

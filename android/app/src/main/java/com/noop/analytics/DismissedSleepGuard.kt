@@ -43,4 +43,8 @@ object DismissedSleepGuard {
      *  night or a manually-added nap) is deleted WITHOUT a tombstone: it is never re-detected, so
      *  suppressing its window would needlessly block a real future night overlapping it. */
     fun writesTombstoneOnDelete(userEdited: Boolean): Boolean = !userEdited
+
+    /** Group retirement suppresses a previously corrected detected row, but not a manually added session. */
+    fun writesTombstoneOnGroupRetirement(userEdited: Boolean, hasAdjustedOnset: Boolean): Boolean =
+        !userEdited || hasAdjustedOnset
 }

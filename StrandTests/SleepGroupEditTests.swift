@@ -92,6 +92,50 @@ final class SleepGroupEditTests: XCTestCase {
                        "the ten remaining sleep minutes must remain in the merged hero total")
     }
 
+    @MainActor
+    func testRepeatedGroupEditTombstonesPreviouslyEditedDroppedDetection() async throws {
+        let dismissedKey = Repository.dismissedSleepDefaultsKey
+        let previousDismissals = UserDefaults.standard.stringArray(forKey: dismissedKey)
+        defer {
+            if let previousDismissals { UserDefaults.standard.set(previousDismissals, forKey: dismissedKey) }
+            else { UserDefaults.standard.removeObject(forKey: dismissedKey) }
+        }
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: source, mac: nil, name: "WHOOP")
+        let now = Int(Date().timeIntervalSince1970)
+        let t0 = now - 12 * 3_600
+        let detected = [
+            CachedSleepSession(startTs: t0, endTs: t0 + 2 * 3_600,
+                               efficiency: nil, restingHr: nil, avgHrv: nil,
+                               stagesJSON: lightStage(t0, t0 + 2 * 3_600)),
+            CachedSleepSession(startTs: t0 + 3 * 3_600, endTs: t0 + 10 * 3_600,
+                               efficiency: nil, restingHr: nil, avgHrv: nil,
+                               stagesJSON: lightStage(t0 + 3 * 3_600, t0 + 10 * 3_600)),
+        ]
+        _ = try await store.upsertSleepSessions(detected, deviceId: source)
+        let repository = Repository(deviceId: source)
+        repository.setStoreForTesting(store)
+
+        var group = try await store.sleepSessions(deviceId: source, from: t0, to: now, limit: 10)
+        await repository.editSleepGroupTimes(
+            sessions: group, newStartTs: t0 + 30 * 60, newEndTs: t0 + 8 * 3_600)
+        group = try await store.sleepSessions(deviceId: source, from: t0, to: now, limit: 10)
+        XCTAssertEqual(group.count, 2)
+        XCTAssertTrue(group.allSatisfy { $0.userEdited && $0.startTsAdjusted != nil })
+
+        await repository.editSleepGroupTimes(
+            sessions: group, newStartTs: t0 + 3 * 3_600, newEndTs: t0 + 7 * 3_600)
+
+        let saved = try await store.sleepSessions(deviceId: source, from: t0, to: now, limit: 10)
+        XCTAssertEqual(saved.map(\.startTs), [t0 + 3 * 3_600])
+        let windows = repository.dismissedSleepWindows()
+        XCTAssertTrue(windows.contains { $0.start == t0 && $0.end == t0 + 2 * 3_600 },
+                      "retiring an already-edited detected fragment must still write its tombstone")
+        XCTAssertTrue(DismissedSleepSpans.isSuppressed(
+            sessionStart: t0, sessionEnd: t0 + 2 * 3_600, windows: windows),
+            "the next detected copy of the retired fragment must be filtered")
+    }
+
 
     @MainActor
     func testUndoDeleteOfMiddleSleepFragmentRemovesItsExactTombstone() async throws {

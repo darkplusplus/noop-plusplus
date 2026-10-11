@@ -877,9 +877,9 @@ class WhoopRepository(
      *  the user could see changed. (#1492)
      *
      *  Fragments overlapping the new window are clipped to it and marked `userEdited`; fragments left
-     *  entirely outside are retired through [deleteSleepSession], so a DETECTED one is tombstoned and the
-     *  next analyzeRecent cannot re-detect it straight back into the night — without that, a shortened
-     *  night simply grows again on the next pass.
+     *  entirely outside are retired. Detected fragments, including those edited earlier, get tombstones
+     *  so the next analyzeRecent cannot re-detect them; manually added sessions have no adjusted onset and
+     *  do not need one.
      *
      *  A one-fragment group reproduces [updateSleepSessionTimes] exactly (the lone fragment takes both
      *  drawn bounds), so an unfragmented night keeps its previous behaviour through the same code. */
@@ -890,7 +890,17 @@ class WhoopRepository(
         val plan = com.noop.analytics.SleepGroupEdit.plan(group, safeStartTs, safeEndTs)
         if (plan.clipped.isEmpty()) return
         dao.upsertSleepSessions(plan.clipped)
-        plan.dropped.forEach { deleteSleepSession(it) }
+        plan.dropped.forEach { deleteRetiredGroupFragment(it) }
+    }
+
+    private suspend fun deleteRetiredGroupFragment(session: SleepSession) {
+        if (com.noop.analytics.DismissedSleepGuard.writesTombstoneOnGroupRetirement(
+                session.userEdited, session.startTsAdjusted != null,
+            )
+        ) {
+            dao.insertDismissedSleep(listOf(DismissedSleep(session.deviceId, session.startTs, session.endTs)))
+        }
+        dao.deleteSleepSession(session.deviceId, session.startTs)
     }
 
     /** Remove a sleep session entirely , the delete half of [updateSleepSessionTimes] with no
