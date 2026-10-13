@@ -28,4 +28,16 @@ class SleepDeleteTombstonePolicyTest {
             DismissedSleepGuard.writesTombstoneOnDelete(userEdited = true),
         )
     }
+
+    @Test fun groupRetirementTombstonesEditedDetectionsButNotManualRows() {
+        assertTrue(DismissedSleepGuard.writesTombstoneOnGroupRetirement(
+            userEdited = false, hasAdjustedOnset = false,
+        ))
+        assertTrue(DismissedSleepGuard.writesTombstoneOnGroupRetirement(
+            userEdited = true, hasAdjustedOnset = true,
+        ))
+        assertFalse(DismissedSleepGuard.writesTombstoneOnGroupRetirement(
+            userEdited = true, hasAdjustedOnset = false,
+        ))
+    }
 }

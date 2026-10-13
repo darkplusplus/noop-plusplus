@@ -1568,6 +1568,44 @@ final class Repository: ObservableObject {
         await refresh()
     }
 
+    /// Apply one corrected bed/wake window to every fragment of the bridged main sleep group. The Sleep
+    /// hero and analytics use the whole group, so editing only the winning fragment leaves earlier/later
+    /// fragments defining the same stale onset or wake. A one-row group keeps the raw-restaging behavior
+    /// of `editSleepTimes`; multi-row edits use the shared clipping planner, retire fragments wholly
+    /// outside the corrected window, and tombstone detected fragments even after an earlier edit.
+    func editSleepGroupTimes(sessions: [CachedSleepSession], newStartTs: Int, newEndTs: Int) async {
+        guard sessions.count > 1, let store = await ensureStore(),
+              let window = SleepEditGuard.clampedEditWindow(
+                start: newStartTs, end: newEndTs, now: Int(Date().timeIntervalSince1970)) else { return }
+        let plan = SleepGroupEdit.plan(sessions, newStartTs: window.start, newEndTs: window.end)
+        guard !plan.clipped.isEmpty else { return }
+
+        for session in plan.clipped {
+            let owners = session.deviceId.map { [$0] } ?? sleepOwnerIds
+            for owner in owners {
+                let changed = (try? await store.applySleepEdit(
+                    deviceId: owner, detectedStartTs: session.startTs,
+                    newStartTs: session.effectiveStartTs, newEndTs: session.endTs,
+                    stagesJSON: session.stagesJSON
+                )) ?? 0
+                if changed > 0 { break }
+            }
+        }
+        for session in plan.dropped {
+            if DismissedSleepSpans.writesTombstoneOnGroupRetirement(
+                userEdited: session.userEdited, hasAdjustedOnset: session.startTsAdjusted != nil) {
+                dismissedSleepSpans = DismissedSleepSpans.adding(
+                    startTs: session.startTs, endTs: session.endTs, to: dismissedSleepSpans)
+            }
+            let owners = session.deviceId.map { [$0] } ?? sleepOwnerIds
+            for owner in owners {
+                let deleted = (try? await store.deleteSleepSession(deviceId: owner, startTs: session.startTs)) ?? 0
+                if deleted > 0 { break }
+            }
+        }
+        await refresh()
+    }
+
     /// Delete ONE sleep session: the `editSleepTimes` path minus the re-stage/re-insert, so the user can
     /// clear a misread or spurious night and the day recomputes as if it were never recorded (#68; Android
     /// parity `WhoopRepository.deleteSleepSession`). `detectedStartTs` is the immutable detected key

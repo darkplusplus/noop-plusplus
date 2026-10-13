@@ -257,19 +257,22 @@ struct SleepView: View {
                 observeResultChange()
             }
             .sheet(item: $wakeEdit) { edit in
-                // The night's RECORDED coverage for the #940 guards: from the immutable detected
-                // onset (where the strap actually saw the night; an earlier hand-set onset widens
-                // it) through the current wake. A corrected window that abandons this range has no
-                // data to stage from, so the editor confirms the move instead of silently creating
-                // a phantom night.
-                let coverageLo = min(edit.detectedStartTs, edit.bedTs)
+                // Validate against the recorded coverage of the complete bridged group. A group edit that
+                // leaves all recorded coverage requires the editor's explicit disjoint-window confirmation.
+                let coverage = SleepGroupEdit.groupWindow(edit.group)
+                let coverageLo = coverage?.start ?? min(edit.detectedStartTs, edit.bedTs)
                 SleepTimeEditor(bedTs: edit.bedTs, wakeTs: edit.wakeTs,
-                                coverage: coverageLo...max(edit.wakeTs, coverageLo + 1),
+                                coverage: coverageLo...max(coverage?.end ?? edit.wakeTs, coverageLo + 1),
                                 suppressesReDetection: !edit.userEdited,
                                 onSave: { newBedTs, newWakeTs in
-                    await repo.editSleepTimes(detectedStartTs: edit.detectedStartTs, oldEndTs: edit.wakeTs,
-                                              storedStagesJSON: edit.stagesJSON,
-                                              newStartTs: newBedTs, newEndTs: newWakeTs)
+                    if edit.group.count > 1 {
+                        await repo.editSleepGroupTimes(sessions: edit.group,
+                                                       newStartTs: newBedTs, newEndTs: newWakeTs)
+                    } else {
+                        await repo.editSleepTimes(detectedStartTs: edit.detectedStartTs, oldEndTs: edit.wakeTs,
+                                                  storedStagesJSON: edit.stagesJSON,
+                                                  newStartTs: newBedTs, newEndTs: newWakeTs)
+                    }
                     // Re-score the day so the dashboard aggregates (Rest / recovery) honor the corrected
                     // sleep window, not just the Sleep tab's session view; then refresh the read cache.
                     await intelligence.analyzeRecent()
@@ -281,7 +284,7 @@ struct SleepView: View {
                     // #65: the returned snapshot lets the user UNDO within a few seconds. It restores the
                     // deleted row into its ORIGINAL namespace and lifts the tombstone.
                     let snapshot = await repo.deleteSleepSession(detectedStartTs: edit.detectedStartTs,
-                                                                 endTs: edit.wakeTs)
+                                                                 endTs: edit.deleteEndTs)
                     await intelligence.analyzeRecent()
                     await repo.refresh()
                     // `edit.bedTs` is the effective (displayed) onset, so the banner shows the same clock
@@ -806,7 +809,9 @@ struct SleepView: View {
                 wakeEdit = WakeEdit(detectedStartTs: nap.startTs,
                                     bedTs: nap.effectiveStartTs,
                                     wakeTs: nap.endTs,
+                                    deleteEndTs: nap.endTs,
                                     stagesJSON: nap.stagesJSON,
+                                    group: [nap],
                                     userEdited: true)   // a nap row is always manually added → no tombstone on delete
             } label: {
                 Image(systemName: isEdited ? "pencil.circle.fill" : "pencil.circle")
@@ -1292,21 +1297,23 @@ struct SleepView: View {
     /// lives right next to the "Woke" value. A filled pencil marks a night already hand-corrected. (#318)
     ///
     /// The hero shows a MERGED/synthetic Night — its `session` carries no `stagesJSON` and a reset
-    /// `userEdited` (mergeDay), with the real stage data in `night.stages`. So resolve the actual stored
-    /// block we're editing — the one whose wake time IS the night's wake — and edit against its detected
-    /// startTs key, current effective bed/wake (to seed the pickers), stagesJSON, and edited state.
+    /// `userEdited` (mergeDay), with real stage data in `night.stages`. Resolve the stored anchor for row
+    /// identity and delete; seed and save the editor using the bridged group shown by the hero.
     @ViewBuilder
     private func wakeEditButton(_ night: Night) -> some View {
-        // Resolve the real stored block by identity (the night's main block), never by re-scanning
-        // `allSessions` for a wake-time match — that guess could pick the wrong source/night and, when
-        // it missed, fall back to the synthetic effective onset (not a real key) so the edit no-oped.
+        // Resolve the real anchor by identity; the editor uses its bridged group and delete its durable row.
         if let target = night.editTarget {
+            let group = SleepView.mainNightGroup(
+                night.sourceBlocks, habitualMidsleepSec: night.habitualMidsleepSec)
+            let editGroup = group.isEmpty ? [target] : group
             let isEdited = target.userEdited
             Button {
                 wakeEdit = WakeEdit(detectedStartTs: target.startTs,
-                                    bedTs: target.effectiveStartTs,
-                                    wakeTs: target.endTs,
+                                    bedTs: night.session.effectiveStartTs,
+                                    wakeTs: night.session.endTs,
+                                    deleteEndTs: target.endTs,
                                     stagesJSON: target.stagesJSON,
+                                    group: editGroup,
                                     userEdited: isEdited)
             } label: {
                 Image(systemName: isEdited ? "pencil.circle.fill" : "pencil.circle")
@@ -2796,10 +2803,12 @@ private struct SleepUndoBanner {
 }
 
 private struct WakeEdit: Identifiable {
-    let detectedStartTs: Int   // immutable detected key the edit writes against
-    let bedTs: Int             // current effective onset (seeds the bed picker)
-    let wakeTs: Int            // current wake (seeds the wake picker)
+    let detectedStartTs: Int   // immutable detected key of the edit anchor
+    let bedTs: Int             // displayed onset (whole bridged group for main sleep)
+    let wakeTs: Int            // displayed wake (whole bridged group for main sleep)
+    let deleteEndTs: Int       // target row's original wake, not the group wake
     let stagesJSON: String?
+    let group: [CachedSleepSession]
     /// True for a hand-edited / manually-added (nap) night. Such a delete writes NO tombstone (it is
     /// never re-detected), so the editor's delete-confirm copy must NOT promise re-detection suppression
     /// for it. Mirrors the undo-banner branch (#65 banner/confirm honesty).

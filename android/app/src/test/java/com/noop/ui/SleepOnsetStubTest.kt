@@ -1,5 +1,6 @@
 package com.noop.ui
 
+import com.noop.analytics.SleepGroupEdit
 import com.noop.data.SleepSession
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -137,6 +138,30 @@ class SleepOnsetStubTest {
         assertTrue("session (edit anchor) is fragment B", hero.session.startTs == bStart)
         assertTrue("window opens at the displayed bedtime (fragment A)", hero.heroOnsetTs == aStart)
         assertTrue("window closes at the group's latest wake (fragment B end)", hero.heroWakeTs == bEnd)
+    }
+
+    /** A user-corrected onset remains authoritative when clipping leaves only ten minutes before the main block. */
+    @Test
+    fun selectNightKeepsExplicitEditedOnsetAndItsRemainingSleep() {
+        val start = 1_780_005_600L // 2026-05-28 22:00 UTC; timezone is pinned to UTC above.
+        val firstEnd = start + 30 * 60
+        val mainStart = firstEnd + 5 * 60
+        val wake = mainStart + 8 * 3600
+        fun segments(from: Long, to: Long): String =
+            """[{"start":$from,"end":$to,"stage":"light"}]"""
+        val plan = SleepGroupEdit.plan(
+            listOf(
+                block(start, firstEnd, segments(start, firstEnd)),
+                block(mainStart, wake, segments(mainStart, wake)),
+            ),
+            newStartTs = start + 20 * 60,
+            newEndTs = wake,
+        )
+
+        val hero = selectNight(listOf(plan.clipped), emptyList(), 0, habitualMidsleepSec = null)!!
+        assertEquals(start + 20 * 60, hero.heroOnsetTs)
+        assertEquals(490.0, hero.groupStages!!.light, 0.01)
+        assertEquals(start + 20 * 60, hero.groupSegments!!.first().start)
     }
 
     // ── Real-night regression (#259 / bridged-night headline): a genuine short first sleep is NOT a lead ──

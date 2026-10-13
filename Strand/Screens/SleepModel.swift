@@ -46,13 +46,13 @@ struct Night {
     /// the hero and the analytics rollup did, for a shift/late sleeper too. nil = cold-start band. (#547)
     var habitualMidsleepSec: Int? = nil
 
-    /// The real stored block a sleep-time edit writes against — the day's MAIN block, resolved by the
+    /// The real stored block that anchors a sleep-time edit — the day's MAIN block, resolved by the
     /// SAME shared selector (`SleepView.mainNightSession` → `SleepStageTotals.mainNightIndex`) the hero,
     /// the naps card, and `AnalyticsEngine.analyzeDay` use, so all of them and the edit affordance agree
-    /// (no re-derived overnight gate). Passes the same learned habitual the hero used, so the edit target
-    /// matches the hero block even for a shift/late sleeper. Its `startTs` is a genuine detected key, so
-    /// `applySleepEdit` matches. nil when there's no underlying block (a synthetic stub) — the edit
-    /// affordance is then hidden. (#318, #518, #547)
+    /// (no re-derived overnight gate). The time editor expands this anchor to its bridged group. The
+    /// learned habitual value keeps the anchor stable for shift/late sleepers. Its `startTs` is a genuine
+    /// detected key, so delete matches; nil when there's no underlying block (a synthetic stub) hides the
+    /// edit affordance. (#318, #518, #547)
     var editTarget: CachedSleepSession? {
         SleepView.mainNightSession(sourceBlocks, habitualMidsleepSec: habitualMidsleepSec)
     }
@@ -265,14 +265,16 @@ extension SleepModel {
 
     /// The night's DISPLAYED onset (bedtime): the first fragment that is NOT a spurious leading
     /// pre-onset awake stub, falling back to the earliest onset when the whole group is stub-like.
-    /// Mirrors the former `SleepView.nightOnsetTs`. (#736, #259)
+    /// Mirrors the former `SleepView.nightOnsetTs`. (#736, #259) Explicit corrections remain authoritative.
     static func nightOnsetTs(_ group: [CachedSleepSession]) -> Int {
         guard let first = group.first else { return 0 }
         let refAsleepMin = group.map {
             SleepView.decodedAsleepMinutes($0.stagesJSON, effectiveStartTs: $0.effectiveStartTs)
         }.max() ?? 0
         for frag in group {
-            if !isPreOnsetAwakeStub(frag, refAsleepMin: refAsleepMin) { return frag.effectiveStartTs }
+            if frag.startTsAdjusted != nil || !isPreOnsetAwakeStub(frag, refAsleepMin: refAsleepMin) {
+                return frag.effectiveStartTs
+            }
         }
         return first.effectiveStartTs
     }

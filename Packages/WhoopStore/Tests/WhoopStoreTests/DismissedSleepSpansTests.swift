@@ -70,6 +70,17 @@ final class DismissedSleepSpansTests: XCTestCase {
                        "a hand-corrected night / manual nap is never re-detected, so no tombstone")
     }
 
+    func testGroupRetirementTombstonesPreviouslyCorrectedDetectedRowsOnly() {
+        XCTAssertTrue(DismissedSleepSpans.writesTombstoneOnGroupRetirement(
+            userEdited: false, hasAdjustedOnset: false))
+        XCTAssertTrue(DismissedSleepSpans.writesTombstoneOnGroupRetirement(
+            userEdited: true, hasAdjustedOnset: true),
+                      "a group-edited detected row still has a detected counterpart")
+        XCTAssertFalse(DismissedSleepSpans.writesTombstoneOnGroupRetirement(
+            userEdited: true, hasAdjustedOnset: false),
+                       "a manually-added session has no detected counterpart")
+    }
+
     // MARK: - Hard cap (no age prune; keeps the newest by end-time)
 
     func testHardCapKeepsNewestByEndTime() {
